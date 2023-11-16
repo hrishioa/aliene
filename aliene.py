@@ -9,7 +9,7 @@ from openai import OpenAI
 from playsound import playsound
 import logging
 import threading
-import datetime
+from datetime import datetime
 import os
 from dotenv import load_dotenv
 
