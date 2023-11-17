@@ -13,6 +13,9 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 
+from helpers.gpt import ask_gpt4_with_image, ask_gpt_4_vanilla, generate_translation, parse_user_command
+from models.Command import Command, UserCommand
+
 load_dotenv()
 
 # Initialize logging
@@ -86,12 +89,14 @@ def record_audio_on_keypress(filename, key='r'):
     key (str, optional): Key to stop recording. Defaults to 'r'.
     """
     recorder = AudioRecorder(filename)
-    recorder.start()
+    keyboard.wait(key)  # Wait for key press
+    
     print(f"Recording... Press '{key}' to stop.")
 
-    keyboard.wait(key)  # Wait for key press
+    recorder.start()
+    keyboard.wait(key)
     recorder.stop()
-    print("Recording stopped.")
+    print("Recording completed.")
 
 def transcribe_audio(file_path):
     with open(file_path, 'rb') as audio_file:
@@ -124,73 +129,70 @@ def encode_image(image_path):
   with open(image_path, "rb") as image_file:
     return base64.b64encode(image_file.read()).decode('utf-8');
 
-def ask_gpt4_with_image(image_path, text, api_key):
-    base64_image = encode_image(image_path)
 
-    headers = {
-      "Content-Type": "application/json",
-      "Authorization": f"Bearer {api_key}"
-    }
-
-    payload = {
-      "model": "gpt-4-vision-preview",
-      "messages": [
-        {
-          "role": "user",
-          "content": [
-            {
-              "type": "text",
-              "text": text
-            },
-            {
-              "type": "image_url",
-              "image_url": {
-                "url": f"data:image/jpeg;base64,{base64_image}"
-              }
-            }
-          ]
-        }
-      ],
-      "max_tokens": 300
-    }
-
-    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-
-    return response.json()
 
 def generate_datecoded_filename(prefix, extension):
     datecode = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"data/{prefix}_{datecode}.{extension}"
 
-def main():
-    # File paths
+def get_transcription():
+    logging.info(" Press 'r' to start recording.")
     audio_file_path = generate_datecoded_filename("audio", "wav")
-    image_file_path = generate_datecoded_filename("image", "jpg")
-
-    logging.info("Starting the application. Press 'r' to start. 'p' to take a picture once the camera is on.")
-
     record_audio_on_keypress(audio_file_path, 'r')
-
-    logging.info('Loading camera...');
-
-    # Wait for 'p' to capture an image
-    capture_image(image_file_path)
-    logging.info(f"Picture taken and saved as {image_file_path}")
-
-    logging.info('Processing audio and image...')
-    # Transcribe audio
     transcription = transcribe_audio(audio_file_path)
-    logging.info(f"Transcription: {transcription}")
-
-    # Interact with GPT-4
-    gpt_response = ask_gpt4_with_image(image_file_path, transcription.text, openai_api_key)
-    gpt_response_text = gpt_response["choices"][0]["message"]["content"]
-    logging.info(f"GPT-4 Response: {gpt_response_text}")
+    return transcription.text
 
 
-    # Convert response to speech
-    text_to_speech(gpt_response_text, generate_datecoded_filename("response", "mp3"))
-    logging.info("Response has been played back as speech.")
+def main():
+    # Boot-up 
+    logging.info("Ailene Starting up....")
+    logging.info("Starting the application.")
+
+    
+    
+    for i in range(4):
+        if i > 0:
+            choice = input("Would you like to continue interacting with Ailene? (Press q to quit and anything else to continue)")
+            if choice and choice[-1] == "q":
+                break
+            
+
+        transcription = get_transcription()
+        logging.info(f"Obtained Transcript of {transcription}")
+        
+        command:Command = parse_user_command(transcription)
+        
+
+        if command == Command.QUERY:
+            # Then we take a picture 
+            choice = input("Would you like to include an image with this query? (Press y and everything else to skip)")
+            comparison = choice == "y"
+            logging.info(f"User made choice of {choice}. Choice is {comparison}")
+            image_file_path = None
+            if choice and choice[-1] == "y":
+                image_file_path = generate_datecoded_filename("image", "jpg")
+                logging.info(f"Generated image_file_path of {image_file_path}")
+                capture_image(image_file_path)
+                logging.info(f"Generated image of {image_file_path}")
+            
+            
+            if image_file_path:
+                response = ask_gpt4_with_image(
+                    image_file_path,
+                    transcription
+                )
+                response = response["choices"][0]["message"]["content"]
+            else:
+                response = ask_gpt_4_vanilla(
+                    transcription
+                )
+            logging.info(f"Obtained Response of {response}")
+            text_to_speech(response, generate_datecoded_filename("response", "mp3"))
+        else:
+            # We generate a translation
+            response = generate_translation(transcription)
+            text_to_speech(response, generate_datecoded_filename("response", "mp3"))
+
 
 if __name__ == "__main__":
     main()
